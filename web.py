@@ -109,6 +109,22 @@ class EmbeddingSettingsRequest(BaseModel):
     api_key: str | None = Field(default=None, min_length=1)
 
 
+class KbSettingsRequest(BaseModel):
+    chunk_size: int | None = Field(default=None, gt=0, le=8000)
+    chunk_overlap: int | None = Field(default=None, ge=0, le=4000)
+
+
+class KbUploadRequest(BaseModel):
+    filename: str = Field(min_length=1)
+    data_b64: str = Field(min_length=1)
+    title: str | None = None
+
+
+class KbSearchRequest(BaseModel):
+    query: str = Field(min_length=1)
+    top_k: int = Field(default=5, gt=0, le=20)
+
+
 class ConversationTitleRequest(BaseModel):
     title: str = Field(min_length=1)
 
@@ -238,6 +254,66 @@ def update_embedding_settings(request: EmbeddingSettingsRequest) -> dict[str, An
         api_key=request.api_key,
     )
     return get_embedding_settings()
+
+
+@app.get("/api/kb-settings")
+def get_kb_settings() -> dict[str, Any]:
+    return {"chunk_size": settings.kb_chunk_size, "chunk_overlap": settings.kb_chunk_overlap}
+
+
+@app.post("/api/kb-settings")
+def update_kb_settings(request: KbSettingsRequest) -> dict[str, Any]:
+    settings.update_kb(chunk_size=request.chunk_size, chunk_overlap=request.chunk_overlap)
+    return get_kb_settings()
+
+
+@app.get("/api/kb/documents")
+def kb_list_documents() -> list[dict[str, Any]]:
+    return agent.tools.kb.list_documents()
+
+
+@app.post("/api/kb/documents")
+def kb_upload_document(request: KbUploadRequest, http_request: Request) -> dict[str, Any]:
+    user_id = _current_user_id(http_request)
+    if len(request.data_b64) > ((MAX_UPLOAD_BYTES + 2) // 3) * 4 + 4:
+        raise HTTPException(status_code=413, detail="檔案過大")
+    data = _decode_upload(request.data_b64)
+    directory = agent.tools.workspace_root(user_id) / "kb_sources"
+    directory.mkdir(parents=True, exist_ok=True)
+    filename = os.path.basename(request.filename.replace("\\", "/")).replace("..", "").strip()
+    if not filename or filename in {".", ".."}:
+        raise HTTPException(status_code=400, detail="無效的檔名")
+    filename = _dedupe_name(directory, filename)
+    target = directory / filename
+    target.write_bytes(data)
+    try:
+        return agent.tools.kb_add_document(
+            agent.tools.workspace_display_rel(target, user_id), title=request.title, user_id=user_id,
+        )
+    except ValueError as exc:
+        target.unlink(missing_ok=True)
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        target.unlink(missing_ok=True)
+        raise HTTPException(status_code=502, detail=f"{type(exc).__name__}: {exc}") from exc
+
+
+@app.delete("/api/kb/documents/{document_id}")
+def kb_remove_document(document_id: int) -> dict[str, bool]:
+    if not agent.tools.kb.remove_document(document_id):
+        raise HTTPException(status_code=404, detail="找不到這份文件")
+    return {"ok": True}
+
+
+@app.post("/api/kb/search")
+def kb_search(request: KbSearchRequest, http_request: Request) -> dict[str, Any]:
+    user_id = _current_user_id(http_request)
+    try:
+        return agent.tools.kb_search(request.query, top_k=request.top_k, user_id=user_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"{type(exc).__name__}: {exc}") from exc
 
 
 @app.get("/api/skills")

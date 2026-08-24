@@ -46,6 +46,32 @@ class LLMClient:
     def __init__(self, config: Config = settings):
         self.config = config
 
+    def embed(self, texts: list[str]) -> list[list[float]]:
+        """Call an OpenAI-compatible /embeddings endpoint (also served by Ollama's
+        OpenAI-compat layer) using the separately-configured embedding_base_url/model/
+        api_key -- deliberately independent of the main chat LLM, see Config.update_embedding.
+        Returns one vector per input text, in the same order as `texts`."""
+        if not self.config.embedding_base_url:
+            raise RuntimeError("尚未設定 Embedding Base URL，請先在設置頁的「連線」分頁填寫")
+        if not self.config.embedding_model:
+            raise RuntimeError("尚未設定 Embedding Model，請先在設置頁的「連線」分頁選擇")
+        url = self.config.embedding_base_url.rstrip("/") + "/embeddings"
+        headers = {"Content-Type": "application/json"}
+        if self.config.embedding_api_key:
+            headers["Authorization"] = f"Bearer {self.config.embedding_api_key}"
+        response = _post_with_connect_retry(
+            url,
+            headers=headers,
+            json={"model": self.config.embedding_model, "input": texts},
+            timeout=self.config.request_timeout,
+        )
+        response.raise_for_status()
+        data = response.json().get("data") or []
+        if len(data) != len(texts):
+            raise RuntimeError(f"Embedding 服務回傳的向量數量（{len(data)}）與輸入數量（{len(texts)}）不符")
+        ordered = sorted(data, key=lambda item: item.get("index", 0))
+        return [item["embedding"] for item in ordered]
+
     @staticmethod
     def fetch_models(base_url: str, api_key: str = "") -> list[str]:
         """Query an OpenAI-compatible /models endpoint and return sorted model ids."""

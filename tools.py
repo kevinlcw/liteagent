@@ -18,6 +18,7 @@ from .config import MCP_SERVERS_PATH
 from .schedule_store import ScheduleStore
 from .db import ConversationStore
 from .memory_store import MemoryStore, VALID_TARGETS
+from .rag_store import ChunkStore
 
 
 # Patterns that identify a shell command as destructive/irreversible enough to warrant a
@@ -38,6 +39,42 @@ _RISKY_SHELL_PATTERNS: list[tuple[re.Pattern, str]] = [
     (re.compile(r"(curl|wget)\b[^|;&]*\|\s*(sudo\s+)?(sh|bash|zsh)\b", re.I), "從網路下載後直接執行程式碼"),
     (re.compile(r":\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}", re.I), "疑似 fork bomb"),
 ]
+
+
+def _chunk_text(text: str, chunk_size: int = 800, overlap: int = 120) -> list[str]:
+    """Paragraph-aware sliding-window chunking, sized in characters (not tokens) to stay
+    dependency-free. Splits on blank lines first so related sentences stay together; any
+    paragraph longer than chunk_size gets further split with `overlap` characters of repeated
+    context at each boundary, so a fact split across a chunk edge still appears whole in at
+    least one chunk."""
+    text = (text or "").strip()
+    if not text:
+        return []
+    paragraphs = [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]
+    if not paragraphs:
+        paragraphs = [text]
+    chunks: list[str] = []
+    buffer = ""
+    for para in paragraphs:
+        candidate = f"{buffer}\n\n{para}" if buffer else para
+        if len(candidate) <= chunk_size:
+            buffer = candidate
+            continue
+        if buffer:
+            chunks.append(buffer)
+            buffer = ""
+        if len(para) <= chunk_size:
+            buffer = para
+            continue
+        start = 0
+        step = max(chunk_size - overlap, 1)
+        while start < len(para):
+            end = start + chunk_size
+            chunks.append(para[start:end])
+            start += step
+    if buffer:
+        chunks.append(buffer)
+    return chunks
 
 
 def classify_shell_risk(command: str) -> str | None:
@@ -66,6 +103,10 @@ TOOLS_SCHEMA = [
     {"type": "function", "function": {"name": "memory_replace", "description": "用子字串比對找到一則現有的長期記憶筆記並整則替換內容。old_text 必須唯一比對到一則筆記，比對到多則或找不到都會回傳錯誤。", "parameters": {"type": "object", "properties": {"target": {"type": "string", "enum": ["memory", "user"], "description": "筆記類別"}, "old_text": {"type": "string", "description": "要找的舊內容片段（子字串）"}, "content": {"type": "string", "description": "新的完整內容"}}, "required": ["target", "old_text", "content"], "additionalProperties": False}}},
     {"type": "function", "function": {"name": "memory_remove", "description": "用子字串比對找到一則現有的長期記憶筆記並刪除。old_text 必須唯一比對到一則筆記，比對到多則或找不到都會回傳錯誤。", "parameters": {"type": "object", "properties": {"target": {"type": "string", "enum": ["memory", "user"], "description": "筆記類別"}, "old_text": {"type": "string", "description": "要找的內容片段（子字串）"}}, "required": ["target", "old_text"], "additionalProperties": False}}},
     {"type": "function", "function": {"name": "memory_list", "description": "列出目前長期記憶裡的所有筆記（可選擇只看某個類別），方便確認目前已經記住哪些內容、或找出要用 memory_replace／memory_remove 處理的既有筆記。", "parameters": {"type": "object", "properties": {"target": {"type": "string", "enum": ["memory", "user"], "description": "選填，只列出這個類別"}}, "additionalProperties": False}}},
+    {"type": "function", "function": {"name": "kb_add_document", "description": "把工作目錄裡的一個純文字檔（.txt/.md 等 UTF-8 文字檔）加入知識庫：自動切成多個片段、產生 embedding 向量並索引起來，之後可以用 kb_search 檢索。需要先在設置頁的「連線」分頁設定好 Embedding Base URL／Model，否則會失敗。", "parameters": {"type": "object", "properties": {"path": {"type": "string", "description": "工作目錄內的相對路徑"}, "title": {"type": "string", "description": "選填，這份文件在知識庫中顯示的標題；不填則用檔名"}}, "required": ["path"], "additionalProperties": False}}},
+    {"type": "function", "function": {"name": "kb_search", "description": "在知識庫中做語意檢索，回傳最相關的內容片段（含來源文件與片段位置），可用來回答需要引用已索引文件內容的問題。若知識庫是空的會回傳提示訊息。", "parameters": {"type": "object", "properties": {"query": {"type": "string", "description": "要查詢的問題或關鍵字"}, "top_k": {"type": "integer", "description": "選填，回傳幾筆最相關的片段，預設 5，最多 20"}}, "required": ["query"], "additionalProperties": False}}},
+    {"type": "function", "function": {"name": "kb_list_documents", "description": "列出知識庫目前已索引的所有文件（標題、片段數、加入時間），方便確認目前已經有哪些內容可供檢索。", "parameters": {"type": "object", "properties": {}, "additionalProperties": False}}},
+    {"type": "function", "function": {"name": "kb_remove_document", "description": "把一份文件連同它所有的片段從知識庫移除，之後 kb_search 就不會再檢索到它。", "parameters": {"type": "object", "properties": {"document_id": {"type": "integer", "description": "從 kb_list_documents 取得的文件 id"}}, "required": ["document_id"], "additionalProperties": False}}},
     {"type": "function", "function": {"name": "run_subagent", "description": "把一個獨立、可以自成一體描述清楚的子任務，交給一個暫時的子代理人同步執行完成，並拿回它的最終結果文字。適合：(a) 任務可以拆成幾個彼此獨立、不互相依賴先後順序的子任務，你想分別委派出去各自處理再自己彙整；或 (b) 一段可能會產生大量中間過程／工具呼叫雜訊的探索型子工作（例如爬很多網頁、跑很多次 shell 試錯），先讓子代理人處理完只回傳精簡結論，避免這些過程塞滿你自己的對話紀錄。注意：子代理人看不到目前對話的任何歷史，所以 task 必須寫成自成一體、包含它需要知道的全部背景與明確目標；它只有一輪、無法再往下開子代理人（不支援巢狀），也不能呼叫 schedule_task/update_plan 之類跟主線相關的工具；遇到危險操作會自動跳過不執行；且有步驟與時間上限，超過會回傳目前為止的部分結果。", "parameters": {"type": "object", "properties": {"task": {"type": "string", "description": "自成一體、包含完整背景與明確目標的子任務描述"}}, "required": ["task"], "additionalProperties": False}}},
 ]
 
@@ -98,6 +139,10 @@ class ToolRegistry:
             "memory_replace": self.memory_replace,
             "memory_remove": self.memory_remove,
             "memory_list": self.memory_list,
+            "kb_add_document": self.kb_add_document,
+            "kb_search": self.kb_search,
+            "kb_list_documents": self.kb_list_documents,
+            "kb_remove_document": self.kb_remove_document,
         }
         # Handlers that need to know which conversation triggered them: schedule_task purely
         # for a provenance field on the stored row; update_plan actually needs it to know which
@@ -110,7 +155,7 @@ class ToolRegistry:
         self._user_aware = {
             "memory_add", "memory_replace", "memory_remove", "memory_list",
             "schedule_task", "list_schedules", "cancel_schedule", "run_subagent",
-            "read_file", "write_file", "run_shell",
+            "read_file", "write_file", "run_shell", "kb_add_document",
         }
         # Handlers whose *creation* of a new record should be tagged with who actually typed
         # it, when that's an admin acting on someone else's behalf (impersonation, see
@@ -124,6 +169,7 @@ class ToolRegistry:
         # Agent owns the "real" one for message history; both point at the same sqlite file.
         self.conversation_store = ConversationStore(self.config.sqlite_path)
         self.memory = MemoryStore(self.config.sqlite_path.parent / "memory.sqlite")
+        self.kb = ChunkStore(self.config.sqlite_path.parent / "kb.sqlite")
         seed_default_config(MCP_SERVERS_PATH, self.config.allowed_root)
         self.mcp = MCPBridge(MCP_SERVERS_PATH, self.config.allowed_root)
         self.mcp.start()
@@ -412,6 +458,56 @@ class ToolRegistry:
         if target:
             target = self._validate_memory_target(target)
         return self.memory.list(target, user_id)
+
+    # ---- Knowledge base / RAG -------------------------------------------------------
+    # Phase 1 (MVP): UTF-8 plain-text files only (.txt/.md/...); pdf/docx/pptx parsing is a
+    # planned Phase 2. One global knowledge base (LiteAgent is single-user, see _admin_id).
+
+    def _kb_embed(self, texts: list[str]) -> list[list[float]]:
+        from .llm_client import LLMClient
+        client = LLMClient(self.config)
+        batch_size = 64
+        vectors: list[list[float]] = []
+        for i in range(0, len(texts), batch_size):
+            vectors.extend(client.embed(texts[i : i + batch_size]))
+        return vectors
+
+    def kb_add_document(self, path: str, title: str | None = None, user_id: str | None = None) -> dict[str, Any]:
+        target = self.safe_path(path, user_id)
+        if not target.exists() or not target.is_file():
+            raise ValueError(f"找不到檔案：{path}")
+        data = target.read_bytes()
+        try:
+            text = data.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise ValueError(
+                "目前知識庫僅支援 UTF-8 純文字檔（.txt/.md 等），此檔案看起來是二進位或其他編碼格式"
+            ) from exc
+        chunks = _chunk_text(text, self.config.kb_chunk_size, self.config.kb_chunk_overlap)
+        if not chunks:
+            raise ValueError("此檔案沒有可索引的文字內容")
+        vectors = self._kb_embed(chunks)
+        doc_title = (title or target.name).strip() or target.name
+        return self.kb.add_document(doc_title, self.workspace_display_rel(target, user_id), chunks, vectors)
+
+    def kb_search(self, query: str, top_k: int = 5, user_id: str | None = None) -> dict[str, Any]:
+        query = str(query or "").strip()
+        if not query:
+            raise ValueError("query 不能是空的")
+        if self.kb.is_empty():
+            return {"results": [], "note": "知識庫目前是空的，請先用 kb_add_document 加入文件"}
+        vector = self._kb_embed([query])[0]
+        top_k = max(1, min(int(top_k or 5), 20))
+        return {"results": self.kb.search(vector, top_k)}
+
+    def kb_list_documents(self) -> list[dict[str, Any]]:
+        return self.kb.list_documents()
+
+    def kb_remove_document(self, document_id: int) -> dict[str, bool]:
+        removed = self.kb.remove_document(int(document_id))
+        if not removed:
+            raise ValueError(f"找不到文件 id={document_id}")
+        return {"removed": True}
 
     @staticmethod
     def _shell_text(value: Any) -> str:

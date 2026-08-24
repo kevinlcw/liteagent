@@ -17,8 +17,11 @@
 - **MCP client**：可連接任意數量的外部 MCP 伺服器，把它們的工具併入同一個工具集。
 - **Sub-agent**：可選功能（預設關閉），讓主 Agent 委派子任務給獨立的子代理人執行；同一輪
   多個子代理人可選擇「單線程」（依序執行）或「多線程」（透過 thread pool 真正平行執行）。
-- **Embedding 設定**：可另外設定一組獨立的 embedding 端點/模型（供未來知識庫檢索功能使用，
-  目前僅提供設定介面）。
+- **知識庫 / RAG**：設定一組獨立的 embedding 端點/模型後，可用 `kb_add_document` 把工作目錄
+  內的文字檔（.txt/.md）切塊、向量化並索引，之後用 `kb_search` 做語意檢索，回答時可引用來源；
+  向量存在本機 SQLite（`kb.sqlite`），暴力比對 cosine similarity，不需要額外的向量資料庫服務。
+  `kb_list_documents`/`kb_remove_document` 管理已索引的文件；目前僅支援 UTF-8 純文字檔，
+  pdf/docx/pptx 解析規劃在後續版本。
 - **排程任務**：類似 cron 的定時/單次任務，完成後可選擇寄 email 通知（需自行設定 SMTP）。
 - **Skills 機制**：讀取 `workspace/skills/<dir>/SKILL.md` 格式的技能包，讓 Agent 依需要載入
   額外的操作指南。
@@ -97,6 +100,9 @@ Python 3.10 以上（型別語法需求）為佳。`pymssql` 在少數平台可�
 | `LITEAGENT_FETCH_MAX_CHARS` | `50000` | 網頁文字最大長度 |
 | `LITEAGENT_SUBAGENT_ENABLED` | `false` | 是否啟用 Sub-agent 工具 |
 | `LITEAGENT_SUBAGENT_CONCURRENCY` | `sequential` | 同一輪多個 Sub-agent 呼叫的執行方式：`sequential`（單線程）或 `parallel`（多線程） |
+| `LITEAGENT_EMBEDDING_BASE_URL` / `LITEAGENT_EMBEDDING_MODEL` / `LITEAGENT_EMBEDDING_API_KEY` | 空 | 知識庫用的 embedding 端點/模型/金鑰，需相容 OpenAI `/embeddings` API（Ollama 亦可） |
+| `LITEAGENT_KB_CHUNK_SIZE` | `800` | 知識庫文件分塊大小（字元數） |
+| `LITEAGENT_KB_CHUNK_OVERLAP` | `120` | 分塊之間的重疊字元數 |
 
 路徑設定建議使用絕對路徑。程式啟動時會自動建立 allowed root、SQLite 和 log 的父目錄。
 

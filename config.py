@@ -85,6 +85,8 @@ class Config:
     embedding_base_url: str = field(default_factory=lambda: os.getenv("LITEAGENT_EMBEDDING_BASE_URL", ""))
     embedding_api_key: str = field(default_factory=lambda: os.getenv("LITEAGENT_EMBEDDING_API_KEY", ""))
     embedding_model: str = field(default_factory=lambda: os.getenv("LITEAGENT_EMBEDDING_MODEL", ""))
+    kb_chunk_size: int = field(default_factory=lambda: int(os.getenv("LITEAGENT_KB_CHUNK_SIZE", "800")))
+    kb_chunk_overlap: int = field(default_factory=lambda: int(os.getenv("LITEAGENT_KB_CHUNK_OVERLAP", "120")))
 
     def __post_init__(self) -> None:
         overrides = _load_runtime_overrides()
@@ -137,6 +139,16 @@ class Config:
             self.embedding_api_key = str(overrides["embedding_api_key"])
         if overrides.get("embedding_model") is not None:
             self.embedding_model = str(overrides["embedding_model"])
+        if overrides.get("kb_chunk_size"):
+            try:
+                self.kb_chunk_size = int(overrides["kb_chunk_size"])
+            except (TypeError, ValueError):
+                pass
+        if overrides.get("kb_chunk_overlap") is not None:
+            try:
+                self.kb_chunk_overlap = int(overrides["kb_chunk_overlap"])
+            except (TypeError, ValueError):
+                pass
 
     @property
     def temp_dir(self) -> Path:
@@ -261,6 +273,23 @@ class Config:
             "embedding_base_url": self.embedding_base_url,
             "embedding_model": self.embedding_model,
             "embedding_api_key": self.embedding_api_key,
+        })
+
+    def update_kb(
+        self,
+        chunk_size: int | None = None,
+        chunk_overlap: int | None = None,
+    ) -> None:
+        """Apply new chunking parameters live, and persist them so they survive a restart.
+        Only affects documents indexed *after* the change -- existing chunks already stored
+        in kb.sqlite keep whatever size they were created with."""
+        if chunk_size:
+            self.kb_chunk_size = int(chunk_size)
+        if chunk_overlap is not None:
+            self.kb_chunk_overlap = int(chunk_overlap)
+        _save_runtime_overrides({
+            "kb_chunk_size": self.kb_chunk_size,
+            "kb_chunk_overlap": self.kb_chunk_overlap,
         })
 
     def prepare(self) -> None:
