@@ -96,6 +96,16 @@ class LLMSettingsRequest(BaseModel):
     request_timeout: int | None = Field(default=None, gt=0, le=3600)
 
 
+class BehaviorSettingsRequest(BaseModel):
+    max_iterations: int | None = Field(default=None, gt=0, le=500)
+    shell_timeout: int | None = Field(default=None, gt=0, le=3600)
+    web_search_results: int | None = Field(default=None, gt=0, le=20)
+    fetch_max_chars: int | None = Field(default=None, gt=0, le=1000000)
+    memory_char_budget: int | None = Field(default=None, gt=0, le=100000)
+    compact_trigger_ratio: float | None = Field(default=None, gt=0, le=1)
+    compact_keep_recent_turns: int | None = Field(default=None, ge=0, le=50)
+
+
 class SubagentSettingsRequest(BaseModel):
     max_iterations: int | None = Field(default=None, gt=0, le=50)
     max_seconds: int | None = Field(default=None, gt=0, le=1800)
@@ -216,6 +226,33 @@ def update_settings(request: LLMSettingsRequest) -> dict[str, Any]:
         "api_key_set": bool(settings.api_key and settings.api_key != "not-required"),
         "request_timeout": settings.request_timeout,
     }
+
+
+@app.get("/api/behavior-settings")
+def get_behavior_settings() -> dict[str, Any]:
+    return {
+        "max_iterations": settings.max_iterations,
+        "shell_timeout": settings.shell_timeout,
+        "web_search_results": settings.web_search_results,
+        "fetch_max_chars": settings.fetch_max_chars,
+        "memory_char_budget": settings.memory_char_budget,
+        "compact_trigger_ratio": settings.compact_trigger_ratio,
+        "compact_keep_recent_turns": settings.compact_keep_recent_turns,
+    }
+
+
+@app.post("/api/behavior-settings")
+def update_behavior_settings(request: BehaviorSettingsRequest) -> dict[str, Any]:
+    settings.update_behavior(
+        max_iterations=request.max_iterations,
+        shell_timeout=request.shell_timeout,
+        web_search_results=request.web_search_results,
+        fetch_max_chars=request.fetch_max_chars,
+        memory_char_budget=request.memory_char_budget,
+        compact_trigger_ratio=request.compact_trigger_ratio,
+        compact_keep_recent_turns=request.compact_keep_recent_turns,
+    )
+    return get_behavior_settings()
 
 
 @app.get("/api/subagent-settings")

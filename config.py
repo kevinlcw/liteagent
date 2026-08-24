@@ -108,6 +108,36 @@ class Config:
                 self.request_timeout = int(overrides["request_timeout"])
             except (TypeError, ValueError):
                 pass
+        if overrides.get("max_iterations"):
+            try:
+                self.max_iterations = int(overrides["max_iterations"])
+            except (TypeError, ValueError):
+                pass
+        if overrides.get("shell_timeout"):
+            try:
+                self.shell_timeout = int(overrides["shell_timeout"])
+            except (TypeError, ValueError):
+                pass
+        if overrides.get("web_search_results"):
+            try:
+                self.web_search_results = int(overrides["web_search_results"])
+            except (TypeError, ValueError):
+                pass
+        if overrides.get("fetch_max_chars"):
+            try:
+                self.fetch_max_chars = int(overrides["fetch_max_chars"])
+            except (TypeError, ValueError):
+                pass
+        if overrides.get("compact_trigger_ratio"):
+            try:
+                self.compact_trigger_ratio = float(overrides["compact_trigger_ratio"])
+            except (TypeError, ValueError):
+                pass
+        if overrides.get("compact_keep_recent_turns") is not None:
+            try:
+                self.compact_keep_recent_turns = int(overrides["compact_keep_recent_turns"])
+            except (TypeError, ValueError):
+                pass
         if overrides.get("smtp_host") is not None:
             self.smtp_host = str(overrides["smtp_host"])
         if overrides.get("smtp_port"):
@@ -202,6 +232,44 @@ class Config:
             "context_window_tokens": self.context_window_tokens,
             "api_key": self.api_key,
             "request_timeout": self.request_timeout,
+        })
+
+    def update_behavior(
+        self,
+        max_iterations: int | None = None,
+        shell_timeout: int | None = None,
+        web_search_results: int | None = None,
+        fetch_max_chars: int | None = None,
+        memory_char_budget: int | None = None,
+        compact_trigger_ratio: float | None = None,
+        compact_keep_recent_turns: int | None = None,
+    ) -> None:
+        """Apply new agent-behavior limits live, and persist them so they survive a restart.
+        Grouped together because they're all "how the agent loop / tools behave" knobs that
+        were previously only settable via .env (a restart required); each is read live at the
+        call site (agent.py / tools.py) so changing it here takes effect on the next request."""
+        if max_iterations:
+            self.max_iterations = int(max_iterations)
+        if shell_timeout:
+            self.shell_timeout = int(shell_timeout)
+        if web_search_results:
+            self.web_search_results = int(web_search_results)
+        if fetch_max_chars:
+            self.fetch_max_chars = int(fetch_max_chars)
+        if memory_char_budget:
+            self.memory_char_budget = int(memory_char_budget)
+        if compact_trigger_ratio:
+            self.compact_trigger_ratio = float(compact_trigger_ratio)
+        if compact_keep_recent_turns is not None:
+            self.compact_keep_recent_turns = int(compact_keep_recent_turns)
+        _save_runtime_overrides({
+            "max_iterations": self.max_iterations,
+            "shell_timeout": self.shell_timeout,
+            "web_search_results": self.web_search_results,
+            "fetch_max_chars": self.fetch_max_chars,
+            "memory_char_budget": self.memory_char_budget,
+            "compact_trigger_ratio": self.compact_trigger_ratio,
+            "compact_keep_recent_turns": self.compact_keep_recent_turns,
         })
 
     def update_smtp(
