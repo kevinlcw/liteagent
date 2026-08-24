@@ -1,0 +1,5 @@
+# 桌面版（macOS App）額外需要的套件，一般網頁服務部署不需要這些。
+# 安裝：.venv/bin/pip install -r requirements.txt -r requirements-desktop.txt
+pywebview>=5.1,<6
+pyobjc-framework-Cocoa>=10.0; sys_platform == "darwin"
+pyobjc-framework-WebKit>=10.0; sys_platform == "darwin"
