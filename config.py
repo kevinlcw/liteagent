@@ -103,6 +103,11 @@ class Config:
                 self.context_window_tokens = int(overrides["context_window_tokens"])
             except (TypeError, ValueError):
                 pass
+        if overrides.get("request_timeout"):
+            try:
+                self.request_timeout = int(overrides["request_timeout"])
+            except (TypeError, ValueError):
+                pass
         if overrides.get("smtp_host") is not None:
             self.smtp_host = str(overrides["smtp_host"])
         if overrides.get("smtp_port"):
@@ -170,10 +175,14 @@ class Config:
         system_prompt: str | None = None,
         context_window_tokens: int | None = None,
         api_key: str | None = None,
+        request_timeout: int | None = None,
     ) -> None:
         """Apply new LLM settings live, and persist them so they survive a restart. `api_key`
         left as None keeps the previously-saved key (mirrors the SMTP password UX of never
-        echoing a saved secret back, but still letting other fields be edited)."""
+        echoing a saved secret back, but still letting other fields be edited). `request_timeout`
+        governs every outbound HTTP call this process makes (chat/embeddings/web fetch/MCP tool
+        calls -- see llm_client.py and tools.py, which all read config.request_timeout live at
+        call time), so raising it here takes effect on the very next request, no restart needed."""
         if base_url:
             self.base_url = base_url.rstrip("/")
         if model:
@@ -184,12 +193,15 @@ class Config:
             self.context_window_tokens = int(context_window_tokens)
         if api_key:
             self.api_key = api_key
+        if request_timeout:
+            self.request_timeout = int(request_timeout)
         _save_runtime_overrides({
             "base_url": self.base_url,
             "model": self.model,
             "system_prompt": self.system_prompt,
             "context_window_tokens": self.context_window_tokens,
             "api_key": self.api_key,
+            "request_timeout": self.request_timeout,
         })
 
     def update_smtp(

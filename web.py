@@ -93,6 +93,7 @@ class LLMSettingsRequest(BaseModel):
     system_prompt: str | None = Field(default=None, min_length=1)
     context_window_tokens: int | None = Field(default=None, gt=0)
     api_key: str | None = Field(default=None, min_length=1)
+    request_timeout: int | None = Field(default=None, gt=0, le=3600)
 
 
 class SubagentSettingsRequest(BaseModel):
@@ -190,12 +191,13 @@ def get_settings() -> dict[str, Any]:
         "default_system_prompt": DEFAULT_SYSTEM_PROMPT,
         "context_window_tokens": settings.context_window_tokens,
         "api_key_set": bool(settings.api_key and settings.api_key != "not-required"),
+        "request_timeout": settings.request_timeout,
     }
 
 
 @app.post("/api/settings")
 def update_settings(request: LLMSettingsRequest) -> dict[str, Any]:
-    if not request.base_url and not request.model and not request.system_prompt and not request.context_window_tokens and not request.api_key:
+    if not request.base_url and not request.model and not request.system_prompt and not request.context_window_tokens and not request.api_key and not request.request_timeout:
         raise HTTPException(status_code=400, detail="至少要提供一項要更新的設定")
     settings.update_llm(
         base_url=request.base_url,
@@ -203,6 +205,7 @@ def update_settings(request: LLMSettingsRequest) -> dict[str, Any]:
         system_prompt=request.system_prompt,
         context_window_tokens=request.context_window_tokens,
         api_key=request.api_key,
+        request_timeout=request.request_timeout,
     )
     return {
         "ok": True,
@@ -211,6 +214,7 @@ def update_settings(request: LLMSettingsRequest) -> dict[str, Any]:
         "system_prompt": settings.system_prompt,
         "context_window_tokens": settings.context_window_tokens,
         "api_key_set": bool(settings.api_key and settings.api_key != "not-required"),
+        "request_timeout": settings.request_timeout,
     }
 
 
