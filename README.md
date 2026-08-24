@@ -30,6 +30,29 @@ LiteAgent 刻意保持**單人**：沒有登入、沒有帳號、沒有多人協
 
 ## 安裝
 
+### 傻瓜安裝（推薦，一行指令）
+
+macOS / Linux 只要有終端機（Terminal），複製貼上這一行，全自動完成（會偵測並可選自動安裝
+Ollama + 下載一個預設模型）：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/kevinlcw/liteagent/main/install.sh | bash -s -- --yes
+```
+
+不加 `-- --yes` 則是互動模式，每個關鍵步驟（要不要裝 Ollama、要不要下載模型、要不要現在啟動）
+都會先問過你再做。安裝完成後會在使用者根目錄產生 `~/LiteAgent/`（可用環境變數
+`LITEAGENT_INSTALL_DIR` 改路徑），內含：
+
+- `~/LiteAgent/start.sh`——之後要啟動，執行這支就好
+- `~/LiteAgent/LiteAgent.command`（macOS 專屬）——在 Finder 對這個檔案**雙擊**即可啟動，
+  不用碰終端機
+
+腳本本身也收在 repo 裡的 [`install.sh`](install.sh)，如果已經手動 `git clone` 過，直接執行
+`bash liteagent/install.sh` 效果相同（不會重複下載）。若已經有自己的地端模型服務、不想讓
+腳本碰 Ollama，加上 `--skip-ollama`。
+
+### 手動安裝
+
 在包含 `liteagent/` 的上層目錄執行：
 
 ```bash
