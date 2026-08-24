@@ -90,7 +90,7 @@ else
   REPO_DIR="$PARENT_DIR/liteagent"
   mkdir -p "$PARENT_DIR"
   if [[ -d "$REPO_DIR/.git" ]]; then
-    info "偵測到既有安裝於 $REPO_DIR，更新中..."
+    info "偵測到既有安裝於 ${REPO_DIR}，更新中..."
     git -C "$REPO_DIR" pull --ff-only
   else
     command -v git >/dev/null 2>&1 || { err "找不到 git，請先安裝 git。"; exit 1; }
@@ -108,7 +108,13 @@ if [[ ! -d ".venv" ]]; then
 fi
 info "安裝套件（第一次執行會花幾分鐘）..."
 ./.venv/bin/pip install --quiet --upgrade pip
-./.venv/bin/pip install --quiet -r liteagent/requirements.txt
+if ! ./.venv/bin/pip install --quiet -r liteagent/requirements.txt; then
+  warn "完整套件安裝失敗（常見原因：pymssql 在此 Python 版本沒有現成的預編譯包，且本機缺少編譯所需的 FreeTDS 開發套件），改為略過 pymssql 安裝其餘套件..."
+  grep -vi '^pymssql' liteagent/requirements.txt > /tmp/liteagent_requirements_core.txt
+  ./.venv/bin/pip install --quiet -r /tmp/liteagent_requirements_core.txt
+  rm -f /tmp/liteagent_requirements_core.txt
+  warn "已略過 pymssql，其餘功能不受影響；之後若需要 SQL Server 查詢工具，macOS 可先 brew install freetds 再執行 ./.venv/bin/pip install pymssql，Linux 則安裝 freetds-dev 後執行同一指令。"
+fi
 
 # 4. 偵測 / 安裝 Ollama
 MODEL_NAME=""
