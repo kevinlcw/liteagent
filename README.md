@@ -1,3 +1,5 @@
+**中文** | [English](README.en.md) | [日本語](README.ja.md)
+
 # LiteAgent
 
 一個直接呼叫**任何 OpenAI-compatible Chat Completions 端點**（Ollama、vLLM、LM Studio、
