@@ -250,6 +250,21 @@ class ConversationStore:
             conn.execute("DELETE FROM messages WHERE conversation_id=?", (conversation_id,))
             conn.execute("DELETE FROM conversation_meta WHERE conversation_id=?", (conversation_id,))
 
+    def delete_from_user_turn(self, conversation_id: str, turn_index: int) -> None:
+        """Deletes the turn_index-th (0-based, counting only role='user') user
+        message and everything at/after it (by id) in this conversation. Used by the "edit
+        and resend" UI feature: when a user edits an earlier message of theirs, the old
+        (now-superseded) exchange must be physically removed from storage, not just hidden in
+        the browser DOM -- otherwise it silently reappears once the page/history is reloaded."""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT id FROM messages WHERE conversation_id=? AND role='user' ORDER BY id LIMIT 1 OFFSET ?",
+                (conversation_id, turn_index),
+            ).fetchone()
+            if row is None:
+                return
+            conn.execute("DELETE FROM messages WHERE conversation_id=? AND id>=?", (conversation_id, row["id"]))
+
     def list_conversations(self, owner_id: str | None = None) -> list[dict[str, Any]]:
         """owner_id=None means "no user filtering" (multi-user auth disabled, or an admin
         wanting to see everything) -- pass the current session's user id to scope the list

@@ -140,6 +140,14 @@ class ConversationTitleRequest(BaseModel):
     title: str = Field(min_length=1)
 
 
+class ConversationTruncateRequest(BaseModel):
+    turn_index: int = Field(ge=0)
+
+
+class MyInstructionsRequest(BaseModel):
+    content: str = Field(default="", max_length=4000)
+
+
 class MCPServerRequest(BaseModel):
     name: str = Field(min_length=1, max_length=40, pattern=r"^[a-zA-Z0-9_-]+$")
     command: str = Field(min_length=1)
@@ -379,6 +387,22 @@ def delete_memory(note_id: int, http_request: Request) -> dict[str, bool]:
     return {"ok": True}
 
 
+@app.get("/api/my-instructions")
+def get_my_instructions(http_request: Request) -> dict[str, Any]:
+    """Self-managed personal system-prompt addendum, separate from the base persona/
+    system prompt in config.py -- see user_prefs_store.py."""
+    return {"content": agent.user_prefs.get(_current_user_id(http_request)), "max_chars": 4000}
+
+
+@app.post("/api/my-instructions")
+def set_my_instructions(request: MyInstructionsRequest, http_request: Request) -> dict[str, Any]:
+    try:
+        content = agent.user_prefs.set(_current_user_id(http_request), request.content)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True, "content": content}
+
+
 @app.get("/api/models")
 def list_models(base_url: str, for_embedding: bool = False) -> list[str]:
     api_key = settings.embedding_api_key if for_embedding and settings.embedding_api_key else settings.api_key
@@ -504,6 +528,16 @@ def set_conversation_title(conversation_id: str, request: ConversationTitleReque
 def delete_conversation(conversation_id: str, http_request: Request) -> dict[str, bool]:
     _require_conversation_access(conversation_id, http_request)
     agent.store.delete_conversation(conversation_id)
+    return {"ok": True}
+
+
+@app.post("/api/conversations/{conversation_id}/truncate")
+def truncate_conversation(conversation_id: str, request: ConversationTruncateRequest, http_request: Request) -> dict[str, bool]:
+    """Used by the "edit and resend" UI feature -- physically deletes the turn_index-th user
+    message and everything after it, so the pre-edit exchange doesn't linger in storage and
+    reappear after a reload."""
+    _require_conversation_access(conversation_id, http_request)
+    agent.store.delete_from_user_turn(conversation_id, request.turn_index)
     return {"ok": True}
 
 

@@ -15,6 +15,7 @@ import time
 
 from .config import Config, settings
 from .db import ConversationStore
+from .user_prefs_store import UserPrefsStore
 from .skills import SKILLS_DIRNAME, list_skills
 from .llm_client import LLMClient
 from .tools import TOOLS_SCHEMA, ToolRegistry, json_result
@@ -86,6 +87,7 @@ class Agent:
         self.verbose = verbose
         self.event_callback = event_callback
         self.store = ConversationStore(config.sqlite_path)
+        self.user_prefs = UserPrefsStore(config.sqlite_path.parent / "user_prefs.sqlite")
         self.client = LLMClient(config)
         self.tools = ToolRegistry(config, subagent_runner=self._run_subagent)
         # Per-conversation counter of run_subagent calls made *during the turn currently in
@@ -187,6 +189,12 @@ class Agent:
         if skills:
             lines = "\n".join(f"- {s['name']}：{s['description']}" for s in skills)
             content += "\n\n目前已存在的技能：\n" + lines
+        custom_instructions = self.user_prefs.get(user_id)
+        if custom_instructions:
+            content += (
+                "\n\n【使用者自訂指令（這位使用者自己設定的個人化偏好，"
+                "在不違反前述系統規則與安全限制的前提下請遵循）】\n" + custom_instructions
+            )
         memory_block = self._memory_block(user_id)
         if memory_block:
             content += (
