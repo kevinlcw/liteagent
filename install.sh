@@ -102,6 +102,21 @@ fi
 cd "$PARENT_DIR"
 
 # 3. 建立虛擬環境並安裝套件
+#    若已有既有 .venv，但裡面的直譯器版本 < 3.10（例如當初用系統內建的舊
+#    python3 建立、之後才升級到新版 Python），mcp 等套件會裝不進去且訊息
+#    不易一眼看懂，這裡主動偵測並自動重建，避免使用者要自己手動排查。
+if [[ -d ".venv" ]]; then
+  VENV_PY_OK=true
+  if [[ -x ".venv/bin/python3" ]]; then
+    ".venv/bin/python3" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' || VENV_PY_OK=false
+  else
+    VENV_PY_OK=false
+  fi
+  if [[ "$VENV_PY_OK" == "false" ]]; then
+    warn "既有虛擬環境的 Python 版本過舊（< 3.10）或已損毀，重新建立 .venv..."
+    rm -rf ".venv"
+  fi
+fi
 if [[ ! -d ".venv" ]]; then
   info "建立 Python 虛擬環境..."
   python3 -m venv .venv
