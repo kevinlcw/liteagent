@@ -27,6 +27,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from .agent import Agent
+from .i18n_strings import normalize_lang
 from .config import DEFAULT_SYSTEM_PROMPT, settings
 from .skills import SKILLS_DIRNAME, list_skills
 from .llm_client import LLMClient
@@ -742,6 +743,7 @@ def chat(request: ChatRequest, http_request: Request) -> dict[str, Any]:
         result = agent.run(
             request.message, request.conversation_id, llm_content=llm_content,
             user_id=user_id, assisted_by=_assisted_by(http_request),
+            ui_lang=normalize_lang(http_request.headers.get("X-UI-Lang")),
         )
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Agent request failed: {type(exc).__name__}: {exc}") from exc
@@ -763,11 +765,12 @@ def chat_stream(request: ChatRequest, http_request: Request) -> StreamingRespons
         _require_conversation_access(request.conversation_id, http_request)
     user_id = _current_user_id(http_request)
     assisted_by = _assisted_by(http_request)
+    ui_lang = normalize_lang(http_request.headers.get("X-UI-Lang"))
 
     def event_source():
         try:
             llm_content = _vision_content(request.message, request.images, user_id)
-            for event in agent.run_stream(request.message, request.conversation_id, llm_content=llm_content, user_id=user_id, assisted_by=assisted_by):
+            for event in agent.run_stream(request.message, request.conversation_id, llm_content=llm_content, user_id=user_id, assisted_by=assisted_by, ui_lang=ui_lang):
                 if event["type"] in {"subagent_start", "subagent_end"}:
                     pass  # always forwarded regardless of the debug toggle
                 elif not request.include_debug and event["type"] in {
@@ -793,11 +796,12 @@ def resume_conversation(conversation_id: str, request: ResumeRequest, http_reque
     _require_conversation_access(conversation_id, http_request)
     user_id = _current_user_id(http_request)
     assisted_by = _assisted_by(http_request)
+    ui_lang = normalize_lang(http_request.headers.get("X-UI-Lang"))
 
     def event_source():
         try:
             decisions = {request.tool_call_id: request.approved}
-            for event in agent.resume_stream(conversation_id, decisions, user_id=user_id, assisted_by=assisted_by):
+            for event in agent.resume_stream(conversation_id, decisions, user_id=user_id, assisted_by=assisted_by, ui_lang=ui_lang):
                 if event["type"] in {"subagent_start", "subagent_end"}:
                     pass  # always forwarded regardless of the debug toggle
                 elif not request.include_debug and event["type"] in {

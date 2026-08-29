@@ -14,6 +14,7 @@ import threading
 import time
 
 from .config import Config, settings
+from .i18n_strings import normalize_lang, STRINGS as I18N_STRINGS
 from .db import ConversationStore
 from .user_prefs_store import UserPrefsStore
 from .skills import SKILLS_DIRNAME, list_skills
@@ -183,8 +184,14 @@ class Agent:
             parts.append("關於使用者的側寫：\n" + "\n".join(f"- {c}" for c in user_notes))
         return "\n\n".join(parts)
 
-    def _system_message(self, summary: str | None = None, user_id: str | None = None) -> dict[str, str]:
+    def _system_message(self, summary: str | None = None, user_id: str | None = None, ui_lang: str | None = None) -> dict[str, str]:
         content = self.config.system_prompt + self.SKILLS_GUIDE + self.MEMORY_GUIDE
+        # Soft nudge only -- never rewrites the (possibly user-customized) system_prompt itself.
+        # Empty string for the default zh-Hant UI language, so behaviour is unchanged when nobody
+        # has switched the UI language away from the default.
+        lang_hint = I18N_STRINGS["system.reply_lang_hint"].get(normalize_lang(ui_lang), "")
+        if lang_hint:
+            content += lang_hint
         skills = list_skills(self.config.allowed_root / SKILLS_DIRNAME)
         if skills:
             lines = "\n".join(f"- {s['name']}：{s['description']}" for s in skills)
@@ -334,6 +341,7 @@ class Agent:
         llm_content: Any = None,
         user_id: str | None = None,
         assisted_by: str | None = None,
+        ui_lang: str | None = None,
     ) -> AgentResult:
         started_at = time.monotonic()
         conversation_id = conversation_id or self.store.new_id()
@@ -354,7 +362,7 @@ class Agent:
             user["assisted_by_email"] = assisted_by
         self.store.append(conversation_id, user)
         first_message = {"role": "user", "content": llm_content if llm_content is not None else user_message}
-        messages = [self._system_message(meta["summary"], user_id), *history, first_message]
+        messages = [self._system_message(meta["summary"], user_id, ui_lang), *history, first_message]
         reasoning_parts: list[str] = []
         input_tokens = 0
         output_tokens = 0
@@ -445,9 +453,10 @@ class Agent:
         llm_content: Any = None,
         user_id: str | None = None,
         assisted_by: str | None = None,
+        ui_lang: str | None = None,
     ) -> AgentResult:
         """Explicit non-streaming entry point kept for API callers."""
-        return self.chat(user_message, conversation_id, llm_content=llm_content, user_id=user_id, assisted_by=assisted_by)
+        return self.chat(user_message, conversation_id, llm_content=llm_content, user_id=user_id, assisted_by=assisted_by, ui_lang=ui_lang)
 
     def _append_tool_message(self, conversation_id: str, messages: list[dict[str, Any]], call_id: str, name: str, result: Any) -> None:
         tool_message = {"role": "tool", "tool_call_id": call_id, "name": name, "content": json_result(result)}
@@ -784,6 +793,7 @@ class Agent:
         llm_content: Any = None,
         user_id: str | None = None,
         assisted_by: str | None = None,
+        ui_lang: str | None = None,
     ) -> Iterator[dict[str, Any]]:
         """Run the agent loop while yielding model and tool progress events."""
         started_at = time.monotonic()
@@ -803,7 +813,7 @@ class Agent:
         self.store.append(conversation_id, user)
         yield {"type": "start", "conversation_id": conversation_id}
         first_message = {"role": "user", "content": llm_content if llm_content is not None else user_message}
-        messages = [self._system_message(meta["summary"], user_id), *history, first_message]
+        messages = [self._system_message(meta["summary"], user_id, ui_lang), *history, first_message]
         yield from self._iterate_stream(conversation_id, messages, started_at, 0, 0, start_iteration=1, user_id=user_id, assisted_by=assisted_by)
 
     def resume_stream(
@@ -812,6 +822,7 @@ class Agent:
         decisions: dict[str, bool],
         user_id: str | None = None,
         assisted_by: str | None = None,
+        ui_lang: str | None = None,
     ) -> Iterator[dict[str, Any]]:
         """Continue a run that was paused by a `confirm_required` event, once the client has
         supplied approve/deny decisions (by tool_call_id) for the pending call(s)."""
@@ -822,7 +833,7 @@ class Agent:
         if not pending:
             yield {"type": "error", "error": "沒有待確認的操作（可能已經處理過了）"}
             return
-        messages = [self._system_message(meta["summary"], user_id), *history]
+        messages = [self._system_message(meta["summary"], user_id, ui_lang), *history]
         # The pending calls belong to the assistant message already at the tail of `history`,
         # so there's no separate "iteration" counter to recover here — 0 is just a label.
         events, paused = yield from self._run_tool_calls(conversation_id, 0, messages, pending, decisions=decisions, user_id=user_id, assisted_by=assisted_by)
