@@ -415,6 +415,14 @@ def list_models(base_url: str, for_embedding: bool = False) -> list[str]:
         raise HTTPException(status_code=502, detail=f"模型清單格式無法解析：{exc}") from exc
 
 
+@app.get("/api/context-window")
+def get_context_window(base_url: str, model: str) -> dict[str, Any]:
+    """Best-effort auto-detect for the Settings UI -- see LLMClient.fetch_context_length()
+    for why this only ever works against an Ollama backend and silently returns None (never
+    a 502) for anything else, so the frontend can just no-op instead of showing an error."""
+    return {"context_length": LLMClient.fetch_context_length(base_url, model)}
+
+
 @app.get("/api/mcp/servers")
 def mcp_servers() -> list[dict[str, Any]]:
     return agent.tools.mcp.list_servers()

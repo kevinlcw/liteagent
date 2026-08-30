@@ -99,6 +99,30 @@ class LLMClient:
         ids = [item.get("id") for item in items or [] if isinstance(item, dict) and item.get("id")]
         return sorted(set(ids))
 
+    @staticmethod
+    def fetch_context_length(base_url: str, model: str) -> int | None:
+        """Best-effort auto-detect of a model's real context window, so the Settings UI can
+        pre-fill 'Context Window Tokens' instead of leaving it at a generic default that may be
+        way bigger than what the backend actually supports (the mismatch is exactly what causes
+        auto-compact to never trigger and the LLM backend to eventually reject an over-long
+        request). Only Ollama exposes this today via its *native* (non-OpenAI-compatible)
+        POST /api/show endpoint -- there is no standard OpenAI API for it, so for any other
+        backend (OpenAI, OpenRouter, etc.) this silently returns None and the UI field is left
+        for the user to fill in by hand, same as before."""
+        root = base_url.rstrip("/")
+        if root.endswith("/v1"):
+            root = root[: -len("/v1")]
+        try:
+            response = requests.post(f"{root}/api/show", json={"model": model}, timeout=5)
+            response.raise_for_status()
+            model_info = response.json().get("model_info") or {}
+        except (requests.exceptions.RequestException, ValueError):
+            return None
+        for key, value in model_info.items():
+            if key.endswith(".context_length") and isinstance(value, (int, float)) and value > 0:
+                return int(value)
+        return None
+
     def chat(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None) -> dict[str, Any]:
         payload: dict[str, Any] = {"model": self.config.model, "messages": messages}
         if tools:
