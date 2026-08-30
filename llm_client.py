@@ -42,6 +42,17 @@ def _post_with_connect_retry(url: str, **kwargs: Any) -> requests.Response:
     raise last_exc
 
 
+def _sanitize_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Some OpenAI-compatible backends (notably Ollama's /v1/chat/completions layer) reject
+    a message whose "content" key is JSON null with "invalid message content type: <nil>",
+    even though the OpenAI spec allows content=null for an assistant message that only carries
+    tool_calls. We store/build messages with content=None in that case (see agent.py), so
+    normalize any null content to "" right before it goes over the wire -- semantically
+    equivalent (no text) and universally accepted, without having to touch every call site
+    that builds a message dict."""
+    return [{**m, "content": m["content"] if m.get("content") is not None else ""} for m in messages]
+
+
 def _raise_for_status_with_body(response: requests.Response) -> None:
     """Like response.raise_for_status(), but folds the response body into the exception
     message -- plain requests.HTTPError only says e.g. '400 Client Error: Bad Request for
@@ -124,7 +135,7 @@ class LLMClient:
         return None
 
     def chat(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None) -> dict[str, Any]:
-        payload: dict[str, Any] = {"model": self.config.model, "messages": messages}
+        payload: dict[str, Any] = {"model": self.config.model, "messages": _sanitize_messages(messages)}
         if tools:
             payload["tools"] = tools
             payload["tool_choice"] = "auto"
@@ -155,7 +166,7 @@ class LLMClient:
         """Yield normalized events from an OpenAI-compatible SSE response."""
         payload = {
             "model": self.config.model,
-            "messages": messages,
+            "messages": _sanitize_messages(messages),
             "tools": tools,
             "tool_choice": "auto",
             "stream": True,
