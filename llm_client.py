@@ -42,6 +42,19 @@ def _post_with_connect_retry(url: str, **kwargs: Any) -> requests.Response:
     raise last_exc
 
 
+def _raise_for_status_with_body(response: requests.Response) -> None:
+    """Like response.raise_for_status(), but folds the response body into the exception
+    message -- plain requests.HTTPError only says e.g. '400 Client Error: Bad Request for
+    url: ...' with no hint of *why*, which is useless for diagnosing things like an Ollama
+    model rejecting a request because the conversation has grown past its actual context
+    window (a very different fix than, say, a malformed tool-call payload)."""
+    try:
+        response.raise_for_status()
+    except requests.HTTPError as exc:
+        body = (response.text or "").strip()[:2000]
+        raise requests.HTTPError(f"{exc} | response body: {body}" if body else str(exc), response=response) from exc
+
+
 class LLMClient:
     def __init__(self, config: Config = settings):
         self.config = config
@@ -65,7 +78,7 @@ class LLMClient:
             json={"model": self.config.embedding_model, "input": texts},
             timeout=self.config.request_timeout,
         )
-        response.raise_for_status()
+        _raise_for_status_with_body(response)
         data = response.json().get("data") or []
         if len(data) != len(texts):
             raise RuntimeError(f"Embedding 服務回傳的向量數量（{len(data)}）與輸入數量（{len(texts)}）不符")
@@ -80,7 +93,7 @@ class LLMClient:
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
         response = requests.get(url, headers=headers, timeout=10)
-        response.raise_for_status()
+        _raise_for_status_with_body(response)
         data = response.json()
         items = data.get("data") if isinstance(data, dict) else data
         ids = [item.get("id") for item in items or [] if isinstance(item, dict) and item.get("id")]
@@ -100,7 +113,7 @@ class LLMClient:
             json=payload,
             timeout=self.config.request_timeout,
         )
-        response.raise_for_status()
+        _raise_for_status_with_body(response)
         data = response.json()
         if not data.get("choices"):
             raise RuntimeError(f"LLM response has no choices: {data}")
@@ -137,7 +150,7 @@ class LLMClient:
             timeout=self.config.request_timeout,
             stream=True,
         ) as response:
-            response.raise_for_status()
+            _raise_for_status_with_body(response)
             # Some OpenAI-compatible servers omit charset on text/event-stream;
             # requests would otherwise decode UTF-8 Chinese as ISO-8859-1.
             response.encoding = "utf-8"
